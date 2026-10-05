@@ -18,6 +18,7 @@
 //! lying about what a migration does.
 
 pub mod catalog;
+pub mod cli;
 pub mod probe;
 pub mod rules;
 pub mod sql;

@@ -15,18 +15,18 @@
 // more correct (writing into a `String` cannot fail) and would bury the report's shape.
 #![allow(clippy::format_push_string)]
 
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use pgdrift::cli::Args;
 use pgdrift::{audit, classify, probe_statement, split, LockLevel, Probe};
 
 const USAGE: &str = "\
 pgdrift — would this migration block production?
 
-  plan   --migration <file|dir> [--fail-on share|access-exclusive|unknown] [--json]
-  prove  --db-url <url> --migration <file|dir> [--json]
-  audit  --db-url <url> [--json]
+  plan   --migration <file|dir> [--fail-on share|access-exclusive|unknown]
+  prove  --db-url <url> --migration <file|dir>
+  audit  --db-url <url>
   report --db-url <url> --migration <file> [--safe <file>] [--seed <schema.sql>] [--out reports/latest.md]
 
 Exit codes: 0 nothing to report, 1 something to look at, 2 usage or connection error.";
@@ -42,60 +42,9 @@ fn main() -> ExitCode {
     }
 }
 
-#[derive(Debug, Default)]
-struct Args {
-    command: String,
-    flags: BTreeMap<String, Vec<String>>,
-}
-
-impl Args {
-    fn parse(raw: &[String]) -> Result<Self, String> {
-        let mut args = Self::default();
-        let mut rest = raw.iter();
-        args.command = rest.next().cloned().unwrap_or_default();
-        while let Some(token) = rest.next() {
-            let Some(key) = token.strip_prefix("--") else {
-                return Err(format!("unexpected argument {token:?}"));
-            };
-            if let Some((key, value)) = key.split_once('=') {
-                args.flags
-                    .entry(key.to_owned())
-                    .or_default()
-                    .push(value.to_owned());
-                continue;
-            }
-            if key == "json" {
-                args.flags
-                    .entry(key.to_owned())
-                    .or_default()
-                    .push("true".to_owned());
-                continue;
-            }
-            let value = rest
-                .next()
-                .ok_or_else(|| format!("--{key} needs a value"))?;
-            args.flags
-                .entry(key.to_owned())
-                .or_default()
-                .push(value.clone());
-        }
-        Ok(args)
-    }
-
-    fn one(&self, key: &str) -> Option<&str> {
-        self.flags
-            .get(key)
-            .and_then(|values| values.last())
-            .map(String::as_str)
-    }
-
-    fn required(&self, key: &str) -> Result<&str, String> {
-        self.one(key).ok_or_else(|| format!("--{key} is required"))
-    }
-}
-
 fn run(raw: &[String]) -> Result<ExitCode, String> {
     let args = Args::parse(raw)?;
+    args.validate()?;
     if args.command.is_empty() || args.command == "help" {
         println!("{USAGE}");
         return Ok(ExitCode::from(if args.command.is_empty() { 2 } else { 0 }));
