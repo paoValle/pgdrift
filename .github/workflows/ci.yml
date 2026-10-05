@@ -38,13 +38,17 @@ jobs:
       - run: cargo clippy --all-targets --all-features -- -D warnings
       - run: cargo test --all-targets
 
-      # the verdict: the risky migration must fail the threshold, the safe one must pass
+      # The verdict. Note what is *not* asserted: that the safe migration passes the same
+      # threshold. It cannot — adding a nullable column is genuinely ACCESS EXCLUSIVE, briefly — and
+      # a lock-level threshold cannot tell one millisecond from forty minutes. That is what `prove`
+      # is for, and why both exist.
       - name: the static verdict
         run: |
-          if cargo run --quiet --release -- plan --migration examples/0001-risky.sql; then
-            echo "::error::the risky migration was not flagged"; exit 1
+          if cargo run --quiet --release -- plan --migration examples/0001-risky.sql --fail-on share; then
+            echo "::error::the risky migration has a write-blocking build and was not flagged"; exit 1
           fi
-          cargo run --quiet --release -- plan --migration examples/0002-safe.sql
+          # nothing in the safe migration is outside the table: no guessing was needed
+          cargo run --quiet --release -- plan --migration examples/0002-safe.sql --fail-on unknown
 
       # the measurement, against a real PostgreSQL
       - name: the measurement
