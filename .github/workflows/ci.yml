@@ -1,0 +1,66 @@
+name: CI
+on:
+  push: { branches: [main] }
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: pgdrift
+        ports: ['55432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      PGDATA_UNUSED: ""
+      DB_URL: postgres://postgres:pgdrift@127.0.0.1:55432/postgres
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo test --all-targets
+
+      # the verdict: the risky migration must fail the threshold, the safe one must pass
+      - name: the static verdict
+        run: |
+          if cargo run --quiet --release -- plan --migration examples/0001-risky.sql; then
+            echo "::error::the risky migration was not flagged"; exit 1
+          fi
+          cargo run --quiet --release -- plan --migration examples/0002-safe.sql
+
+      # the measurement, against a real PostgreSQL
+      - name: the measurement
+        run: cargo run --quiet --release -- prove --db-url "$DB_URL" --migration examples/0001-risky.sql
+
+      - name: what the schema already hides
+        run: |
+          cargo run --quiet --release -- report --db-url "$DB_URL" \
+            --migration examples/0001-risky.sql --safe examples/0002-safe.sql \
+            --seed examples/schema.sql --out reports/latest.md
+          # the seeded schema has four known problems: the audit must find them
+          if cargo run --quiet --release -- audit --db-url "$DB_URL"; then
+            echo "::error::the audit found nothing in a schema with four known problems"; exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: report
+          path: reports/

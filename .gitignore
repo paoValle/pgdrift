@@ -1,0 +1,7 @@
+# Only ignores what is noise for this project.
+
+.DS_Store
+*.swp
+/target/
+*.log
+# the generated report is committed on purpose: it is the evidence
