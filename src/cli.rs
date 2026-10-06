@@ -100,8 +100,8 @@ pub fn allowed_flags(command: &str) -> &'static [&'static str] {
     match command {
         "plan" => &["migration", "fail-on"],
         "prove" => &["db-url", "migration"],
-        "audit" => &["db-url"],
-        "report" => &["db-url", "migration", "safe", "seed", "out"],
+        "audit" => &["db-url", "warn-int4-over"],
+        "report" => &["db-url", "migration", "safe", "seed", "out", "warn-int4-over"],
         // `help`, and anything that is not a command: no flags, and the caller says why
         _ => &[],
     }

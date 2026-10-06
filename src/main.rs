@@ -26,7 +26,7 @@ pgdrift — would this migration block production?
 
   plan   --migration <file|dir> [--fail-on share|access-exclusive|unknown]
   prove  --db-url <url> --migration <file|dir>
-  audit  --db-url <url>
+  audit  --db-url <url> [--warn-int4-over <rows>]
   report --db-url <url> --migration <file> [--safe <file>] [--seed <schema.sql>] [--out reports/latest.md]
 
 Exit codes: 0 nothing to report, 1 something to look at, 2 usage or connection error.";
@@ -177,10 +177,52 @@ fn print_probe(file: &Path, probe: &Probe) {
     }
 }
 
+/// The `int4` threshold, when the caller asked for that check.
+///
+/// The check is the one judgement among the four, so it is opt-in: a flag that is absent means the
+/// check did not run, and the report says so instead of reporting zero findings as "nothing found".
+fn int4_threshold(args: &Args) -> Result<Option<u64>, String> {
+    match args.one("warn-int4-over") {
+        None => Ok(None),
+        Some(value) => value
+            .parse::<u64>()
+            .map(Some)
+            .map_err(|_| format!("--warn-int4-over wants a number of rows, got {value:?}")),
+    }
+}
+
+/// The audit section: the findings, or the note that the one judgement check did not run.
+fn push_schema_section(
+    markdown: &mut String,
+    findings: &[pgdrift::catalog::Finding],
+    int4_over: Option<u64>,
+) {
+    markdown.push_str("\n## What the schema already hides\n\n");
+    if findings.is_empty() {
+        markdown.push_str("Nothing: no unindexed foreign key, no table without a primary key, no invalid index.\n");
+    } else {
+        markdown.push_str("| check | subject | why it matters |\n|---|---|---|\n");
+        for finding in findings {
+            markdown.push_str(&format!(
+                "| {} | `{}` | {} |\n",
+                finding.check, finding.subject, finding.why
+            ));
+        }
+    }
+    // A reader has to be able to tell "checked and clean" from "not checked": the section is an
+    // artifact somebody keeps, and silence about a check that did not run is the kind of silence
+    // this project exists to remove.
+    if int4_over.is_none() {
+        markdown.push_str(
+            "\nThe `int4` primary key check is a judgement and did not run: pass `--warn-int4-over <rows>` to ask for it.\n",
+        );
+    }
+}
+
 /// What the schema already hides.
 fn audit_command(args: &Args) -> Result<ExitCode, String> {
     let url = args.required("db-url")?;
-    let findings = audit(url)?;
+    let findings = audit(url, int4_threshold(args)?)?;
     for finding in &findings {
         println!(
             "{:<28} {:<48} {}",
@@ -188,6 +230,11 @@ fn audit_command(args: &Args) -> Result<ExitCode, String> {
         );
     }
     println!("{} finding(s)", findings.len());
+    if int4_threshold(args)?.is_none() {
+        println!(
+            "(the `int4` primary key check is a judgement and did not run: add --warn-int4-over <rows>)"
+        );
+    }
     Ok(if findings.is_empty() {
         ExitCode::SUCCESS
     } else {
@@ -282,19 +329,8 @@ fn report(args: &Args) -> Result<ExitCode, String> {
     }
 
     // 4. what the schema already hides
-    markdown.push_str("\n## What the schema already hides\n\n");
-    let findings = audit(url)?;
-    if findings.is_empty() {
-        markdown.push_str("Nothing: no unindexed foreign key, no table without a primary key, no invalid index, no `int4` primary key.\n");
-    } else {
-        markdown.push_str("| check | subject | why it matters |\n|---|---|---|\n");
-        for finding in &findings {
-            markdown.push_str(&format!(
-                "| {} | `{}` | {} |\n",
-                finding.check, finding.subject, finding.why
-            ));
-        }
-    }
+    let int4_over = int4_threshold(args)?;
+    push_schema_section(&mut markdown, &audit(url, int4_over)?, int4_over);
 
     let out = args.one("out").unwrap_or("reports/latest.md");
     if let Some(parent) = Path::new(out).parent() {
