@@ -1,0 +1,18 @@
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule: { interval: weekly }
+    open-pull-requests-limit: 5
+    # `postgres` is the only dependency and it is the one that talks to the database: a major
+    # there changes what `prove` measures, so it gets read rather than merged.
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: monthly }
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
