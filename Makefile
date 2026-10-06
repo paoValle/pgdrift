@@ -5,6 +5,10 @@
 .DEFAULT_GOAL := help
 DB_PORT ?= 55432
 DB_URL ?= postgres://postgres:pgdrift@127.0.0.1:$(DB_PORT)/postgres
+# The int4 check is the judgement one, and the demo asks for it at a million rows: the schema in
+# examples/ is planted with a 2.1-billion ceiling nobody will reach and a table the planner has no
+# estimate for, and the report says which of the two it is looking at.
+INT4_OVER ?= 1000000
 
 .PHONY: help setup db-up db-down plan prove audit report test lint fmt fmt-check ci clean
 
@@ -32,13 +36,13 @@ plan: ## the verdict on the risky migration (expects exit 1)
 prove: ## measure the risky migration against the demo database
 	@cargo run --quiet --release -- prove --db-url "$(DB_URL)" --migration examples/0001-risky.sql
 
-audit: ## what the seeded schema already hides
-	@cargo run --quiet --release -- audit --db-url "$(DB_URL)"
+audit: ## what the seeded schema already hides (fourth check at $(INT4_OVER) rows)
+	@cargo run --quiet --release -- audit --db-url "$(DB_URL)" --warn-int4-over $(INT4_OVER)
 
 report: ## write reports/latest.md (starts from a fresh schema)
 	@cargo run --quiet --release -- report --db-url "$(DB_URL)" \
 		--migration examples/0001-risky.sql --safe examples/0002-safe.sql \
-		--seed examples/schema.sql --out reports/latest.md > /dev/null
+		--seed examples/schema.sql --warn-int4-over $(INT4_OVER) --out reports/latest.md > /dev/null
 	@printf "wrote reports/latest.md (%s lines)\n" "$$(wc -l < reports/latest.md)"
 
 test: ## the lexer and the table, no database needed

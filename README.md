@@ -50,8 +50,10 @@ write block.
   statements replayed into it, a read-lock holder, a write-lock holder, `lock_timeout`, and the
   actual lock read from `pg_locks`.
 - **`audit`** — what the schema already hides, from the catalog, with no configuration file:
-  unindexed foreign keys, tables without a primary key, invalid indexes (the wreckage of a failed
-  `CREATE INDEX CONCURRENTLY`), and `int4` primary keys.
+  unindexed foreign keys, tables without a primary key, and invalid indexes (the wreckage of a failed
+  `CREATE INDEX CONCURRENTLY`) are facts and always run. The fourth, an `int4` primary key, is a
+  judgement about how big a table will get: it runs only when asked, with
+  `--warn-int4-over <rows>`, and it names the planner's estimate — or says the table has none.
 - **`report`** — the artifact: verdict, measurement, the same migration written safely, and the
   audit. The committed [`reports/latest.md`](reports/latest.md) is the output of exactly that run.
 
@@ -72,7 +74,7 @@ make db-down
 
 CI runs all of it against a PostgreSQL 16 service container, and asserts the gate: the risky
 migration must be flagged, the safe one must not, and the audit must find all four planted problems
-in `examples/schema.sql`.
+in `examples/schema.sql` once it is asked for the fourth with `--warn-int4-over`.
 
 ## How it works
 
@@ -105,14 +107,15 @@ Not here, and not claimed:
 - **one database, no migration history.** It does not know what has already been applied, and it is
   not a migration runner.
 - **no rules beyond the four audit checks**, and no configuration file to add more: a check that needs
-  a config file is a check somebody has to maintain.
+  a config file is a check somebody has to maintain. The one that is a judgement is a flag, not a
+  config file.
 
 ## What I would do differently
 
 - The audit checks are the least interesting part and the easiest to grow into a checklist nobody
-  reads. Three of them are facts; the fourth (`int4` primary key) is a judgement about how big a table
-  will get, and it should be a warning with a threshold, not a finding with the same weight as an
-  invalid index.
+  reads. The `int4` threshold is now a flag instead of a finding with the same weight as an invalid
+  index; what is still missing is an alert that fires *before* the key runs out, which needs history
+  this tool does not keep.
 - The probe runs three attempts per statement, which means the setup cost is paid three times. With a
   hundred-statement migration that is minutes; a smarter version would reuse the schema for the two
   holder probes and only rebuild when a statement cannot be rolled back.

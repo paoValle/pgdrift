@@ -17,10 +17,10 @@ Each statement is tried against a live PostgreSQL while another session holds a 
 
 | statement | predicted | measured | blocked by a reader | blocked by a writer | waits when unopposed |
 |---|---|---|---|---|---|
-| `ALTER TABLE orders ADD COLUMN note text` | ACCESS EXCLUSIVE | ACCESS EXCLUSIVE | **yes** | **yes** | 1 ms |
-| `CREATE INDEX orders_created_at_idx ON orders (created_at)` | SHARE | SHARE | no | **yes** | 6 ms |
-| `ALTER TABLE order_items ADD CONSTRAINT order_items_order_fk F...` | SHARE ROW EXCLUSIVE | SHARE ROW EXCLUSIVE | no | **yes** | 4 ms |
-| `ALTER TABLE orders ALTER COLUMN note TYPE varchar(400)` | ACCESS EXCLUSIVE | ACCESS EXCLUSIVE | **yes** | **yes** | 27 ms |
+| `ALTER TABLE orders ADD COLUMN note text` | ACCESS EXCLUSIVE | ACCESS EXCLUSIVE | **yes** | **yes** | 0 ms |
+| `CREATE INDEX orders_created_at_idx ON orders (created_at)` | SHARE | SHARE | no | **yes** | 5 ms |
+| `ALTER TABLE order_items ADD CONSTRAINT order_items_order_fk F...` | SHARE ROW EXCLUSIVE | SHARE ROW EXCLUSIVE | no | **yes** | 2 ms |
+| `ALTER TABLE orders ALTER COLUMN note TYPE varchar(400)` | ACCESS EXCLUSIVE | ACCESS EXCLUSIVE | **yes** | **yes** | 15 ms |
 
 0 statement(s) where the measurement and the table disagree.
 
@@ -40,4 +40,4 @@ Each statement is tried against a live PostgreSQL while another session holds a 
 | unindexed foreign key | `order_items.order_id (order_items_order_id_fkey)` | deleting or updating the referenced row scans the whole referencing table, under a lock |
 | table without a primary key | `events` | no row can be identified: logical replication and anything that updates a single row are out |
 | invalid index | `orders_created_at_idx on orders` | what a failed CREATE INDEX CONCURRENTLY leaves: never used by the planner, still written to on every insert |
-| int4 primary key | `sessions.id` | a ceiling of 2.1 billion rows, and widening it later is an ACCESS EXCLUSIVE rewrite |
+| int4 primary key | `sessions.id` | a ceiling of 2.1 billion rows, and no estimate for this table yet (run ANALYZE) — which is not the same as small |
