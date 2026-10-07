@@ -169,3 +169,69 @@ fn the_lock_levels_report_what_they_block() {
     assert!(!LockLevel::ShareUpdateExclusive.blocks_readers());
     assert!(!LockLevel::ShareUpdateExclusive.blocks_writers());
 }
+
+#[test]
+fn the_columns_a_statement_names_are_found_where_they_enable_a_measurement() {
+    use sql::{ColumnUse, NamedColumn};
+
+    let named = |name: &str, use_: ColumnUse| NamedColumn {
+        name: name.to_owned(),
+        use_,
+    };
+
+    assert_eq!(
+        sql::named_columns("ALTER TABLE t ALTER COLUMN c SET NOT NULL"),
+        vec![named("c", ColumnUse::Alter)]
+    );
+    assert_eq!(
+        sql::named_columns("ALTER TABLE a ADD CONSTRAINT fk FOREIGN KEY (x, y) REFERENCES o (id)"),
+        vec![
+            named("x", ColumnUse::ForeignKey),
+            named("y", ColumnUse::ForeignKey)
+        ]
+    );
+    assert_eq!(
+        sql::named_columns("CREATE INDEX i ON t (a, b DESC)"),
+        vec![named("a", ColumnUse::Index), named("b", ColumnUse::Index)]
+    );
+    assert_eq!(
+        sql::named_columns("ALTER TABLE orders ALTER COLUMN note TYPE varchar(400)"),
+        vec![named("note", ColumnUse::Alter)]
+    );
+}
+
+#[test]
+fn a_column_that_cannot_be_read_as_a_plain_name_is_not_reported() {
+    // the conservative half: inventing a column from an expression would measure the statement
+    // against a shape it does not expect, which is the failure this tool exists to avoid
+    let nothing = Vec::<sql::NamedColumn>::new();
+    assert_eq!(
+        sql::named_columns("CREATE INDEX i ON t (lower(email))"),
+        nothing
+    );
+    assert_eq!(
+        sql::named_columns("CREATE INDEX i ON t (a COLLATE \"C\")"),
+        nothing
+    );
+    assert_eq!(
+        sql::named_columns("ALTER TABLE t ADD COLUMN c text"),
+        nothing
+    );
+    assert_eq!(sql::named_columns("SELECT 1"), nothing);
+}
+
+#[test]
+fn the_referenced_column_is_found_when_the_foreign_key_spells_it_out() {
+    assert_eq!(
+        sql::referenced_column(
+            "ALTER TABLE a ADD CONSTRAINT fk FOREIGN KEY (x) REFERENCES orders (id)"
+        )
+        .as_deref(),
+        Some("id")
+    );
+    assert_eq!(
+        sql::referenced_column("ALTER TABLE a ADD CONSTRAINT fk FOREIGN KEY (x) REFERENCES orders")
+            .as_deref(),
+        None
+    );
+}

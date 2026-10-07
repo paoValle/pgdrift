@@ -186,3 +186,149 @@ pub fn referenced_table(sql: &str) -> Option<String> {
         .collect();
     (!name.is_empty()).then_some(name.trim_matches('"').to_owned())
 }
+
+/// Where a statement names a column, which is what decides the type the probe gives it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColumnUse {
+    /// `ALTER COLUMN <name>`, `SET NOT NULL`, a type change: any type will do.
+    Alter,
+    /// A column in an index list, or in a foreign key.
+    Index,
+    /// A column in a `FOREIGN KEY` list: its type has to match what it references.
+    ForeignKey,
+}
+
+/// A column a statement names, and where it names it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NamedColumn {
+    /// The column name, quotes removed.
+    pub name: String,
+    /// Where the statement named it.
+    pub use_: ColumnUse,
+}
+
+/// The columns a statement names, in the places this can read without guessing.
+///
+/// The probe adds a named column to the scratch table when it is missing: a statement that alters,
+/// indexes or references a column nobody has invented yet otherwise fails with a database error and
+/// is reported as not measurable, which is honest and useless.
+///
+/// It is deliberately conservative. It returns nothing rather than a guess, because a column
+/// invented from a wrong guess would be measured against a shape the statement does not expect —
+/// the failure this tool exists to avoid. An expression index (`(lower(email))`), a column list
+/// this cannot read as plain names, or a statement that names nothing all give an empty list.
+#[must_use]
+pub fn named_columns(sql: &str) -> Vec<NamedColumn> {
+    let upper = sql.to_uppercase();
+    let mut names: Vec<NamedColumn> = Vec::new();
+
+    let mut push = |name: String, use_: ColumnUse| {
+        if let Some(existing) = names.iter_mut().find(|named| named.name == name) {
+            // a foreign key decides the type even when the column is also indexed or altered
+            if use_ == ColumnUse::ForeignKey {
+                existing.use_ = use_;
+            }
+            return;
+        }
+        names.push(NamedColumn { name, use_ });
+    };
+
+    if let Some(position) = upper.find("ALTER COLUMN ") {
+        // the grammar fixes this one: `ALTER COLUMN <name> SET | TYPE | DROP | ...`, so the next
+        // token is the column and whatever follows it is the action, not a direction
+        if let Some(name) = leading_identifier(&sql[position + "ALTER COLUMN ".len()..]) {
+            push(name, ColumnUse::Alter);
+        }
+    }
+
+    if let Some(position) = upper.find("FOREIGN KEY") {
+        for name in key_list(&sql[position + "FOREIGN KEY".len()..]) {
+            push(name, ColumnUse::ForeignKey);
+        }
+    }
+
+    if upper.contains(" INDEX ") {
+        // the index columns are the first parenthesised list after the table it is built on
+        if let Some(position) = upper.find(" ON ") {
+            for name in key_list(&sql[position + " ON ".len()..]) {
+                push(name, ColumnUse::Index);
+            }
+        }
+    }
+
+    names
+}
+
+/// The column a foreign key references, when it spells one out: `REFERENCES orders (id)` -> `id`.
+///
+/// `REFERENCES orders` names the primary key without saying so, and the probe's primary key is a
+/// `bigint`, so the caller defaults to that.
+#[must_use]
+pub fn referenced_column(sql: &str) -> Option<String> {
+    let upper = sql.to_uppercase();
+    let position = upper.find("REFERENCES")?;
+    key_list(&sql[position + "REFERENCES".len()..])
+        .into_iter()
+        .next()
+}
+
+/// The names inside a parenthesised list, when every item is a plain column.
+fn key_list(rest: &str) -> Vec<String> {
+    let Some(open) = rest.find('(') else {
+        return Vec::new();
+    };
+    let Some(close) = rest[open..].find(')') else {
+        return Vec::new();
+    };
+    let mut names = Vec::new();
+    for item in rest[open + 1..open + close].split(',') {
+        let Some(name) = column_of(item) else {
+            return Vec::new();
+        };
+        names.push(name);
+    }
+    names
+}
+
+/// One item of a key or column list: a name, optionally followed by a direction and a null ordering.
+///
+/// Anything else — an expression, a function, an operator class — is not a column we can name, and
+/// is reported as nothing rather than as the first token of an expression.
+fn column_of(item: &str) -> Option<String> {
+    let tokens: Vec<&str> = item.split_whitespace().collect();
+    let (name, tail) = tokens.split_first()?;
+    if !is_identifier(name) {
+        return None;
+    }
+    let tail = tail.join(" ").to_uppercase();
+    let allowed = [
+        "",
+        "ASC",
+        "DESC",
+        "NULLS FIRST",
+        "NULLS LAST",
+        "ASC NULLS FIRST",
+        "ASC NULLS LAST",
+        "DESC NULLS FIRST",
+        "DESC NULLS LAST",
+    ];
+    allowed
+        .contains(&tail.as_str())
+        .then(|| name.trim_matches('"').to_owned())
+}
+
+/// The identifier at the start of `rest`, for the places where the grammar says one must be there.
+fn leading_identifier(rest: &str) -> Option<String> {
+    let name = rest.split_whitespace().next()?;
+    is_identifier(name).then(|| name.trim_matches('"').to_owned())
+}
+
+fn is_identifier(text: &str) -> bool {
+    // a quoted name is only a name when the whole token is the quoted name: `"My` is half of one
+    let quoted = text.len() > 1 && text.starts_with('"') && text.ends_with('"');
+    if text.contains('"') && !quoted {
+        return false;
+    }
+    let name = text.trim_matches('"');
+    !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_')
+}

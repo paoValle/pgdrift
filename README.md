@@ -96,9 +96,12 @@ dollar-quoted function bodies all contain semicolons.
 Not here, and not claimed:
 
 - **a scratch schema, not your schema.** `prove` creates and drops a schema named `pgdrift_probe` and
-  measures there. The table shape is a generic one, so a statement that needs a column nobody has
-  invented yet is reported as not measurable — never measured against the wrong thing. **Do not point
-  it at production**: it mutates a schema, even if it is its own.
+  measures there. The table shape is a generic one; when a statement names a column nobody creates —
+  an `ALTER COLUMN x`, a `FOREIGN KEY (x)`, an index on `x` — that column is added to the probe table,
+  typed from what a foreign key references or from the scratch shape's own name, with a default so the
+  statement can run, and the report says which columns it added. A column no statement names is still
+  never invented: measuring against a shape the statement does not expect is the failure this tool
+  exists to avoid. **Do not point it at production**: it mutates a schema, even if it is its own.
 - **PostgreSQL 16 is what was measured.** The table is a claim about documented behaviour, and the
   probe is the check on it; on another major version the probe is still right and the table may need
   the same correction this one got.
