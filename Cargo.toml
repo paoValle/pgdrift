@@ -1,6 +1,6 @@
 [package]
 name = "pgdrift"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 rust-version = "1.80"
 description = "Would this migration block production? A static verdict, and then a measurement against a real PostgreSQL."
