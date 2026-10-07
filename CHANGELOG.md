@@ -5,6 +5,8 @@ versioning [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-07
+
 ### Changed
 - `prove` adds a column to the scratch table when the statement it measures names one that nobody
   creates: `ALTER COLUMN x`, `FOREIGN KEY (x)` and an index column. The type comes from the column a
