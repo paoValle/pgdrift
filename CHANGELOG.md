@@ -5,6 +5,14 @@ versioning [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- `prove` adds a column to the scratch table when the statement it measures names one that nobody
+  creates: `ALTER COLUMN x`, `FOREIGN KEY (x)` and an index column. The type comes from the column a
+  foreign key references, or from the scratch shape's own name, and the added column carries a default
+  so a `SET NOT NULL` behind it is measurable. Statements that only name columns the schema already
+  has are measured exactly as before; the report lists what was added, and a column no statement names
+  is still never invented.
+
 ## [0.1.0] - 2026-10-05
 
 First version: a verdict per statement, and then the measurement that can contradict it.

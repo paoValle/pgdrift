@@ -22,7 +22,7 @@ use std::time::{Duration, Instant};
 use postgres::{Client, NoTls};
 
 use crate::rules::{classify, LockLevel};
-use crate::sql::{referenced_table, target_table};
+use crate::sql::{named_columns, referenced_column, referenced_table, target_table, ColumnUse};
 
 /// How long a probe waits for a lock before declaring that it would have been blocked.
 const LOCK_TIMEOUT: Duration = Duration::from_millis(300);
@@ -293,6 +293,10 @@ fn reset(
         .map_err(|error| format!("cannot set up the probe schema: {}", describe(&error)))?;
 
     for (position, earlier) in prior.iter().enumerate() {
+        // the replayed statements are part of the state this one is measured in, so they get the
+        // same treatment: a prior that names a column nobody creates would fail here, and the
+        // statement would then be measured in a schema where it never applied
+        add_named_columns(admin, earlier, probe)?;
         if let Err(error) = admin.batch_execute(earlier) {
             probe.evidence.push(format!(
                 "statement {} of the migration was not replayed into the probe schema: {}",
@@ -301,7 +305,97 @@ fn reset(
             ));
         }
     }
+
+    add_named_columns(admin, statement, probe)?;
     Ok(())
+}
+
+/// Adds the columns this statement names, when the scratch table does not have them.
+///
+/// The scratch shape stays generic: it does not pre-create what the migration itself adds, because
+/// a column added by statement 1 is the state statement 4 is meant to be measured in. The gap was
+/// the other direction — a statement that alters, indexes or references a column nobody invents
+/// failed here and was reported as not measurable, which is honest and useless.
+///
+/// A column is added only when this statement names it, with the type of what a foreign key
+/// references or the scratch shape's own type for that name, and the evidence says what was added.
+/// A qualified table name is left alone: the script above would create it as written, and turning
+/// that into a write outside the probe schema is not a decision this function gets to make.
+fn add_named_columns(admin: &mut Client, statement: &str, probe: &mut Probe) -> Result<(), String> {
+    let Some(table) = target_table(statement) else {
+        return Ok(());
+    };
+    if table.contains('.') {
+        return Ok(());
+    }
+    let named = named_columns(statement);
+    if named.is_empty() {
+        return Ok(());
+    }
+
+    let existing = columns_of(admin, &table)?;
+    let referenced = referenced_column(statement);
+    for column in named {
+        if existing.contains(&column.name) {
+            continue;
+        }
+        let sql_type = match column.use_ {
+            // a foreign key column has to have the type of the column it points at
+            ColumnUse::ForeignKey => scratch_type(referenced.as_deref().unwrap_or("id")),
+            ColumnUse::Alter | ColumnUse::Index => scratch_type(&column.name),
+        };
+        let script = format!(
+            "ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {} {sql_type} DEFAULT {};",
+            column.name,
+            default_for(sql_type)
+        );
+        admin.batch_execute(&script).map_err(|error| {
+            format!(
+                "cannot add the column {} to the probe table {table}: {}",
+                column.name,
+                describe(&error)
+            )
+        })?;
+        probe.evidence.push(format!(
+            "the probe table had no column {}, so it was added as {sql_type} with a default: this statement names it",
+            column.name
+        ));
+    }
+    Ok(())
+}
+
+/// The columns of a scratch table, read back from the schema the probe just built.
+fn columns_of(admin: &mut Client, table: &str) -> Result<Vec<String>, String> {
+    let rows = admin
+        .query(
+            "SELECT column_name FROM information_schema.columns \
+             WHERE table_schema = 'pgdrift_probe' AND table_name = $1",
+            &[&table],
+        )
+        .map_err(|error| format!("cannot read the probe schema: {}", describe(&error)))?;
+    Ok(rows.iter().map(|row| row.get(0)).collect())
+}
+
+/// The type a column gets when the probe has to invent it: the scratch shape's own names, and `text`
+/// for anything else, because a type the statement did not tell us about is better chosen text-then-
+/// failed than guessed into a constraint that passes for the wrong reason.
+fn scratch_type(column: &str) -> &'static str {
+    match column {
+        "id" | "order_id" => "bigint",
+        "n" => "int",
+        "created_at" => "timestamptz",
+        _ => "text",
+    }
+}
+
+/// A value for the added column: the rows of the scratch table exist before the column does, and a
+/// column full of nulls is not the state a later `SET NOT NULL` is written for.
+fn default_for(sql_type: &str) -> &'static str {
+    match sql_type {
+        "bigint" | "int" => "1",
+        "timestamptz" => "now()",
+        _ => "'v'",
+    }
 }
 
 fn teardown(admin: &mut Client) {
