@@ -68,7 +68,7 @@ make plan      # the verdict: the risky migration fails, the safe one passes
 make prove     # the measurement against that database
 make audit     # what the seeded schema already hides
 make report    # writes reports/latest.md
-make ci        # fmt + clippy -D warnings + 9 tests (no database needed)
+make ci        # fmt + clippy -D warnings + 22 tests (no database needed)
 make db-down
 ```
 
@@ -87,7 +87,7 @@ migrations/*.sql ──► sql.rs (a lexer, not split(';')) ──► rules.rs (
                                                   catalog.rs ──┴──► pg_catalog
 ```
 
-The lexer is about sixty lines and has the most tests in the repository: splitting a migration file
+The lexer is about ninety lines and has the most tests in the repository: splitting a migration file
 on `;` is where a tool starts lying about what a migration does, because strings, comments and
 dollar-quoted function bodies all contain semicolons.
 

@@ -2,7 +2,7 @@
 //!
 //! A migration file is not a list of statements separated by `;`: it has comments, quoted strings,
 //! dollar-quoted bodies and semicolons inside all of them. Splitting it with `split(';')` is how a
-//! tool starts lying about what a migration does, so this is a small lexer instead — about sixty
+//! tool starts lying about what a migration does, so this is a small lexer instead — about ninety
 //! lines, and it is the part of `pgdrift` with the most tests.
 
 /// A statement, ready to be classified.
