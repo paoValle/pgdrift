@@ -68,7 +68,7 @@ make plan      # the verdict: the risky migration fails, the safe one passes
 make prove     # the measurement against that database
 make audit     # what the seeded schema already hides
 make report    # writes reports/latest.md
-make ci        # fmt + clippy -D warnings + 22 tests (no database needed)
+make ci        # fmt + clippy -D warnings + 25 tests (no database needed)
 make db-down
 ```
 
