@@ -25,6 +25,8 @@ jobs:
     env:
       PGDATA_UNUSED: ""
       DB_URL: postgres://postgres:pgdrift@127.0.0.1:55432/postgres
+      # the row threshold the demo asks the fourth (judgement) check for, the same as `make`
+      INT4_OVER: "1000000"
     steps:
       - uses: actions/checkout@v4
 
@@ -56,13 +58,21 @@ jobs:
 
       - name: what the schema already hides
         run: |
+          # The same command as `make report`, `--warn-int4-over` included: that flag is what makes
+          # the artifact uploaded here the document committed in `reports/`.
           cargo run --quiet --release -- report --db-url "$DB_URL" \
             --migration examples/0001-risky.sql --safe examples/0002-safe.sql \
-            --seed examples/schema.sql --out reports/latest.md
-          # the seeded schema has four known problems: the audit must find them
-          if cargo run --quiet --release -- audit --db-url "$DB_URL"; then
+            --seed examples/schema.sql --warn-int4-over "$INT4_OVER" --out reports/latest.md
+          # The seeded schema has four known problems, and the fourth is a judgement that only runs
+          # when asked for: the audit must find all four, not merely exit non-zero on the first
+          # three. Without the flag the fourth line says it did not run, and this step proves it.
+          if cargo run --quiet --release -- audit --db-url "$DB_URL" --warn-int4-over "$INT4_OVER" > audit.txt; then
             echo "::error::the audit found nothing in a schema with four known problems"; exit 1
           fi
+          for check in "unindexed foreign key" "table without a primary key" "invalid index" "int4 primary key"; do
+            grep -q "$check" audit.txt || { echo "::error::the audit did not report: $check"; exit 1; }
+          done
+          cat audit.txt
 
       - uses: actions/upload-artifact@v4
         with:
