@@ -28,10 +28,15 @@ db-up: ## start a throwaway PostgreSQL 16 on $(DB_PORT)
 db-down: ## stop it
 	@docker rm -f pgdrift-pg > /dev/null 2>&1 || true
 
-plan: ## the verdict on the risky migration (expects exit 1)
-	@cargo run --quiet --release -- plan --migration examples/0001-risky.sql || true
+# The two runs ask different questions, the same two CI's static verdict asks: the risky migration
+# is "is anything here write-blocking" (--fail-on share), the safe one is "is anything outside the
+# table" (--fail-on unknown). The safe migration still takes ACCESS EXCLUSIVE for its added column,
+# briefly and unavoidably — a lock level cannot tell one millisecond from forty minutes, which is
+# what `prove` measures. Under the default `--fail-on access-exclusive` this target exits 1.
+plan: ## the verdict on both examples (risky fails, safe passes)
+	@cargo run --quiet --release -- plan --migration examples/0001-risky.sql --fail-on share || true
 	@echo "--- the same intent, written safely (expects exit 0) ---"
-	@cargo run --quiet --release -- plan --migration examples/0002-safe.sql
+	@cargo run --quiet --release -- plan --migration examples/0002-safe.sql --fail-on unknown
 
 prove: ## measure the risky migration against the demo database
 	@cargo run --quiet --release -- prove --db-url "$(DB_URL)" --migration examples/0001-risky.sql
