@@ -271,6 +271,21 @@ fn classify_alter(sql: &str) -> Rule {
             "build the unique index with CREATE UNIQUE INDEX CONCURRENTLY first, then ADD CONSTRAINT ... USING INDEX",
         );
     }
+    if contains(sql, "ADD CONSTRAINT") && contains(sql, "CHECK") {
+        // Measured with pg_locks on PostgreSQL 16: ACCESS EXCLUSIVE with and without NOT VALID.
+        // What NOT VALID changes is the scan, not the lock.
+        let not_valid = contains(sql, "NOT VALID");
+        return Rule::new(
+            "alter table add check constraint",
+            LockLevel::AccessExclusive,
+            Some(!not_valid),
+            if not_valid {
+                "brief ACCESS EXCLUSIVE: NOT VALID keeps it brief, and the scan is deferred to VALIDATE CONSTRAINT"
+            } else {
+                "ACCESS EXCLUSIVE *and* a full scan to verify every row: ADD CONSTRAINT ... NOT VALID first, then VALIDATE CONSTRAINT in a separate step"
+            },
+        );
+    }
     if contains(sql, "DROP CONSTRAINT") || contains(sql, "RENAME") || contains(sql, "SET SCHEMA") {
         return Rule::new(
             "alter table metadata change",
