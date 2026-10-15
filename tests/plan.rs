@@ -131,6 +131,18 @@ fn the_table_classifies_the_lock_each_statement_takes() {
             LockLevel::AccessExclusive,
             false,
         ),
+        // measured with pg_locks on PostgreSQL 16: ACCESS EXCLUSIVE either way; NOT VALID
+        // defers the full scan, it does not change the lock
+        (
+            "ALTER TABLE t ADD CONSTRAINT ck CHECK (n >= 0)",
+            LockLevel::AccessExclusive,
+            true,
+        ),
+        (
+            "ALTER TABLE t ADD CONSTRAINT ck CHECK (n >= 0) NOT VALID",
+            LockLevel::AccessExclusive,
+            false,
+        ),
         ("VACUUM t", LockLevel::ShareUpdateExclusive, false),
         (
             "CREATE TRIGGER tr AFTER INSERT ON t FOR EACH ROW EXECUTE FUNCTION f()",

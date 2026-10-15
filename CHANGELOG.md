@@ -5,6 +5,11 @@ versioning [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- The table knows `ALTER TABLE ... ADD CONSTRAINT ... CHECK`, with and without `NOT VALID`.
+  Measured with `pg_locks` on PostgreSQL 16 it takes `ACCESS EXCLUSIVE` either way; what `NOT VALID`
+  changes is the scan, not the lock. It used to be reported as unknown.
+
 ## [0.1.1] - 2026-10-07
 
 ### Changed
