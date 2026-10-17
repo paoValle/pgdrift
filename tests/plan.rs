@@ -54,6 +54,12 @@ fn the_target_table_is_found_in_the_common_shapes() {
         ),
         ("LOCK TABLE orders IN ACCESS EXCLUSIVE MODE", Some("orders")),
         ("TRUNCATE orders", Some("orders")),
+        // the probe identifies the table from the statement, so an index-only statement has none:
+        // this is what makes `prove` skip it, which the README's scope declares. Pinned here so
+        // an edit to `target_table` cannot silently turn the skip into a measurement against a
+        // scratch table named after the index.
+        ("DROP INDEX idx", None),
+        ("DROP INDEX CONCURRENTLY idx", None),
         ("SELECT 1", None),
     ] {
         assert_eq!(
@@ -89,6 +95,16 @@ fn the_table_classifies_the_lock_each_statement_takes() {
         ),
         ("CREATE INDEX i ON t (a)", LockLevel::Share, false),
         ("CREATE UNIQUE INDEX i ON t (a)", LockLevel::Share, false),
+        // measured with pg_locks on PostgreSQL 16: SHARE UPDATE EXCLUSIVE on the table; it
+        // conflicts with SHARE (a plain CREATE INDEX), not with a reader's ACCESS SHARE
+        (
+            "DROP INDEX CONCURRENTLY i",
+            LockLevel::ShareUpdateExclusive,
+            false,
+        ),
+        // measured with pg_locks on PostgreSQL 16 by hand, because the probe cannot name the
+        // table of a statement that names only an index: ACCESS EXCLUSIVE on the index's table
+        ("DROP INDEX i", LockLevel::AccessExclusive, false),
         (
             "ALTER TABLE t ADD COLUMN c int",
             LockLevel::AccessExclusive,
@@ -158,6 +174,17 @@ fn the_table_classifies_the_lock_each_statement_takes() {
         assert_eq!(rule.lock, expected, "{statement} → {:?}", rule.lock);
         assert_eq!(rule.rewrite, Some(rewrite), "{statement} rewrite");
     }
+}
+
+#[test]
+fn a_dropped_index_is_not_reported_as_a_created_one() {
+    // `DROP INDEX CONCURRENTLY` used to come out of the table labelled "create index
+    // concurrently": the lock level was right and the name of the statement was not.
+    assert_eq!(
+        classify("DROP INDEX CONCURRENTLY i").kind,
+        "drop index concurrently"
+    );
+    assert_eq!(classify("DROP INDEX i").kind, "drop index");
 }
 
 #[test]
