@@ -6,9 +6,16 @@ versioning [SemVer](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- The table knows the two index drops: `DROP INDEX` takes `ACCESS EXCLUSIVE` on the index's table
+  and `DROP INDEX CONCURRENTLY` takes `SHARE UPDATE EXCLUSIVE`, both measured with `pg_locks` on
+  PostgreSQL 16. A plain `DROP INDEX` used to be reported as unknown.
 - The table knows `ALTER TABLE ... ADD CONSTRAINT ... CHECK`, with and without `NOT VALID`.
   Measured with `pg_locks` on PostgreSQL 16 it takes `ACCESS EXCLUSIVE` either way; what `NOT VALID`
   changes is the scan, not the lock. It used to be reported as unknown.
+
+### Fixed
+- `DROP INDEX CONCURRENTLY` came out of the table labelled "create index concurrently": the lock
+  level was right and the name of the statement was not.
 
 ## [0.1.1] - 2026-10-07
 

@@ -68,7 +68,7 @@ make plan      # the verdict: the risky migration fails, the safe one passes
 make prove     # the measurement against that database
 make audit     # what the seeded schema already hides
 make report    # writes reports/latest.md
-make ci        # fmt + clippy -D warnings + 25 tests (no database needed)
+make ci        # fmt + clippy -D warnings + 26 tests (no database needed)
 make db-down
 ```
 
@@ -109,6 +109,9 @@ Not here, and not claimed:
   100 GB table is an outage: `pgdrift` reports the lock, and the time depends on your data.
 - **one database, no migration history.** It does not know what has already been applied, and it is
   not a migration runner.
+- **a statement that names only an index is skipped by `prove`.** The probe identifies the table a
+  statement touches from the statement itself, so `DROP INDEX i` has no table to measure against and
+  is skipped rather than guessed. Its entry in the table was read out of `pg_locks` by hand.
 - **no rules beyond the four audit checks**, and no configuration file to add more: a check that needs
   a config file is a check somebody has to maintain. The one that is a judgement is a flag, not a
   config file.

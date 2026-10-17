@@ -18,13 +18,14 @@ pub enum LockLevel {
     None,
     /// `INSERT`, `UPDATE`, `DELETE`: blocks other writers' DDL, not readers.
     RowExclusive,
-    /// `VACUUM`, `CREATE INDEX CONCURRENTLY`, `VALIDATE CONSTRAINT`: does not block reads or writes.
+    /// `VACUUM`, `CREATE INDEX CONCURRENTLY`, `DROP INDEX CONCURRENTLY`, `VALIDATE CONSTRAINT`:
+    /// does not block reads or writes.
     ShareUpdateExclusive,
     /// `CREATE INDEX` (without `CONCURRENTLY`): blocks writes for the whole build, allows reads.
     Share,
     /// `CREATE TRIGGER`: blocks writes, allows reads.
     ShareRowExclusive,
-    /// `ALTER TABLE`: blocks reads and writes.
+    /// `ALTER TABLE`, `DROP INDEX`: blocks reads and writes.
     AccessExclusive,
     /// Not in the table, so `pgdrift` will not guess.
     Unknown,
@@ -104,24 +105,8 @@ impl Rule {
 pub fn classify(statement: &str) -> Rule {
     let sql = statement.to_uppercase();
 
-    if sql.starts_with("CREATE INDEX CONCURRENTLY")
-        || sql.starts_with("CREATE UNIQUE INDEX CONCURRENTLY")
-        || sql.starts_with("DROP INDEX CONCURRENTLY")
-    {
-        return Rule::new(
-            "create index concurrently",
-            LockLevel::ShareUpdateExclusive,
-            Some(false),
-            "online: it does not block reads or writes, but it takes longer and can leave an invalid index if it fails",
-        );
-    }
-    if sql.starts_with("CREATE INDEX") || sql.starts_with("CREATE UNIQUE INDEX") {
-        return Rule::new(
-            "create index",
-            LockLevel::Share,
-            Some(false),
-            "blocks writes for the whole build: CREATE INDEX CONCURRENTLY instead, outside a transaction",
-        );
+    if let Some(rule) = classify_index(&sql) {
+        return rule;
     }
     if sql.starts_with("REINDEX") {
         return Rule::new(
@@ -198,6 +183,56 @@ pub fn classify(statement: &str) -> Rule {
         None,
         "this statement is not in pgdrift's table: it will not guess a lock level. Run `pgdrift prove` against a real database, or add the rule",
     )
+}
+
+/// The index statements: building one and dropping one, with and without `CONCURRENTLY`.
+///
+/// Its own function only because `classify` is a table long enough already; the entries are the
+/// same kind of curated claim as the ones below it.
+fn classify_index(sql: &str) -> Option<Rule> {
+    if sql.starts_with("CREATE INDEX CONCURRENTLY")
+        || sql.starts_with("CREATE UNIQUE INDEX CONCURRENTLY")
+    {
+        return Some(Rule::new(
+            "create index concurrently",
+            LockLevel::ShareUpdateExclusive,
+            Some(false),
+            "online: it does not block reads or writes, but it takes longer and can leave an invalid index if it fails",
+        ));
+    }
+    if sql.starts_with("DROP INDEX CONCURRENTLY") {
+        // Measured with pg_locks on PostgreSQL 16: SHARE UPDATE EXCLUSIVE on the index's table.
+        // It conflicts with SHARE — the lock a plain CREATE INDEX takes — and not with the
+        // ACCESS SHARE a reader holds, so the probe's reader would not see it as a read block.
+        return Some(Rule::new(
+            "drop index concurrently",
+            LockLevel::ShareUpdateExclusive,
+            Some(false),
+            "online: it does not block reads or writes, but it cannot run inside a transaction block",
+        ));
+    }
+    if sql.starts_with("CREATE INDEX") || sql.starts_with("CREATE UNIQUE INDEX") {
+        return Some(Rule::new(
+            "create index",
+            LockLevel::Share,
+            Some(false),
+            "blocks writes for the whole build: CREATE INDEX CONCURRENTLY instead, outside a transaction",
+        ));
+    }
+    if sql.starts_with("DROP INDEX") {
+        // Measured with pg_locks on PostgreSQL 16, by hand because the probe identifies the table
+        // from the statement and a DROP INDEX names only an index: ACCESS EXCLUSIVE on the
+        // index's table, the lock DROP TABLE and TRUNCATE also take. To re-measure it: create a
+        // table and an index, then in a second session
+        // `BEGIN; DROP INDEX i; SELECT mode FROM pg_locks WHERE pid = pg_backend_pid();`.
+        return Some(Rule::new(
+            "drop index",
+            LockLevel::AccessExclusive,
+            Some(false),
+            "blocks reads and writes for the whole drop: DROP INDEX CONCURRENTLY instead, outside a transaction",
+        ));
+    }
+    None
 }
 
 fn classify_alter(sql: &str) -> Rule {
